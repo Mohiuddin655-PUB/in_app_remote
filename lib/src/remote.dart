@@ -8,41 +8,71 @@ import 'package:flutter/services.dart';
 import 'delegate.dart';
 import 'map_writer.dart';
 
+/// A generic Remote data manager with support for:
+/// - Loading from assets, cache, and remote (delegate-based) sources
+/// - Live updates via subscriptions
+/// - ChangeNotifier for reactive UI binding
+/// - Symmetric and standard path handling
 class Remote<T extends RemoteDelegate> extends ChangeNotifier {
+  /// Constructor
   Remote();
 
   // ---------------------------------------------------------------------------
   // INITIAL PART
   // ---------------------------------------------------------------------------
 
+  /// Merged properties of all loaded paths
   final Map _props = {};
+
+  /// Registered data paths
   Set<String> _paths = {};
+
+  /// Paths that require synchronous handling
   Set<String> _symmetricPaths = {};
 
+  /// Name of the remote instance
   String _name = 'remote';
+
+  /// Connection status
   bool _connected = false;
+
+  /// Whether live subscriptions are active
   bool _listening = false;
+
+  /// Whether logs are enabled
   bool _showLogs = false;
+
+  /// Delegate for backend operations
   T? _delegate;
+
+  /// Callback called after initialization
   VoidCallback? _callback;
 
+  /// Get current remote name
   String get name => _name;
 
+  /// Get merged properties
   Map get props => _props;
 
+  /// Get registered paths
   Set<String> get paths => _paths;
 
+  /// Check if remote is connected
   bool get connected => _connected;
 
+  /// Check if logging is enabled
   bool get showLogs => _showLogs;
 
+  /// Get current delegate
   T? get delegate => _delegate;
 
+  /// Log message if logging is enabled
   void log(Object? msg) {
     if (!_showLogs) return;
     dev.log(msg.toString(), name: name.toUpperCase());
   }
 
+  /// Initialize remote with optional delegate, paths, and callbacks
   Future<void> initialize({
     required String name,
     T? delegate,
@@ -61,6 +91,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     _connected = connected;
     _listening = listening;
     _callback = onReady;
+
     await _loads();
     if (_listening) await _subscribes();
   }
@@ -69,6 +100,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // CONNECTION PART
   // ---------------------------------------------------------------------------
 
+  /// Re-subscribe to all paths
   Future<void> resubscribes() async {
     _listening = true;
     try {
@@ -78,10 +110,10 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     }
   }
 
-  Future<void> cancelSubscriptions() {
-    return _unsubscribes();
-  }
+  /// Cancel all active subscriptions
+  Future<void> cancelSubscriptions() => _unsubscribes();
 
+  /// Change connection status and reload data if necessary
   Future<void> changeConnection(bool value) async {
     if (_connected == value) return;
     _connected = value;
@@ -96,6 +128,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // ASSET PART
   // ---------------------------------------------------------------------------
 
+  /// Load data from asset JSON
   Future<Map?> _assets(String path) async {
     try {
       path = "$path.json";
@@ -119,6 +152,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // CACHE PART
   // ---------------------------------------------------------------------------
 
+  /// Load cached data for a path
   Future<Map?> _cached(String path) async {
     if (_delegate == null) return null;
     try {
@@ -130,6 +164,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     }
   }
 
+  /// Save data to cache
   Future<bool> _save(String path, Map? data) async {
     if (_delegate == null) return false;
     try {
@@ -145,6 +180,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // REMOTE PART
   // ---------------------------------------------------------------------------
 
+  /// Fetch remote data using delegate
   Future<void> _fetch(String path) async {
     if (_delegate == null) return;
     try {
@@ -152,9 +188,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
       final data = await _delegate!.fetch(name, path);
       await _save(path, data);
     } on TimeoutException catch (_) {
-      log(
-        "Timeout while connecting to $path. Please check your connection.",
-      );
+      log("Timeout while connecting to $path. Please check your connection.");
     } catch (msg) {
       log(msg);
     }
@@ -164,10 +198,13 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // LOADING PART
   // ---------------------------------------------------------------------------
 
+  /// Loading state
   bool _loading = false;
 
+  /// Whether currently loading
   bool get loading => _loading;
 
+  /// Load data for a single path
   Future<void> _load(
     String path, {
     bool changed = false,
@@ -175,20 +212,26 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   }) async {
     try {
       if (!changed || reload) await _fetch(path);
+
       Map data = {};
       final local = _props[path];
       if (local is Map) data = data.combine(local);
+
       if (!changed) {
         Map? asset = await _assets(path);
         if (asset != null) data = data.combine(asset);
       }
+
       Map? cache = await _cached(path);
       if (cache != null) data = data.combine(cache);
+
       if (data.isEmpty) {
         _props.remove(path);
         return;
       }
+
       _props[path] = data;
+
       if (changed) {
         notifyListeners();
         log("$path properties changed!");
@@ -197,6 +240,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
       } else {
         log("$path properties loaded!");
       }
+
       if (_delegate != null) {
         changed ? _delegate!.changes(name, path) : _delegate!.ready(name, path);
       }
@@ -205,11 +249,13 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     }
   }
 
+  /// Load all paths
   Future<void> _loads() async {
     try {
       _loading = true;
       notifyListeners();
       if (_delegate != null) await _delegate!.loading();
+
       for (final path in paths) {
         if (_symmetricPaths.contains(path)) {
           await _load(path);
@@ -217,11 +263,12 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
           _load(path);
         }
       }
+
       _loading = false;
       notifyListeners();
       log("all symmetric properties loaded!");
       if (_delegate != null) await _delegate!.loaded();
-      if (_callback != null) _callback!();
+      _callback?.call();
     } catch (msg) {
       _loading = false;
       notifyListeners();
@@ -229,6 +276,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     }
   }
 
+  /// Reload all paths, optionally showing loading indicator
   Future<void> reload({
     bool showLoading = false,
     bool notifiable = true,
@@ -249,7 +297,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
       if (notifiable || showLoading) notifyListeners();
       log("all symmetric properties reloaded!");
       if (_delegate != null) await _delegate!.loaded();
-      if (_callback != null) _callback!();
+      _callback?.call();
     } catch (msg) {
       log(msg);
     }
@@ -259,14 +307,17 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
   // SUBSCRIPTIONS PART
   // ---------------------------------------------------------------------------
 
+  /// Active subscriptions for live updates
   final Map<String, StreamSubscription?> _subscriptions = {};
 
+  /// Subscribe to a single path
   Future<void> _subscribe(String path) async {
     if (_delegate == null) return;
     try {
       await _subscriptions[path]?.cancel();
       _subscriptions.remove(path);
       if (!_connected) return;
+
       _subscriptions[path] = _delegate!.listen(name, path).listen((data) async {
         if (data == _props[path]) return;
         final kept = await _save(path, data);
@@ -274,14 +325,13 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
         await _load(path, changed: true);
       });
     } on TimeoutException catch (_) {
-      log(
-        "Timeout while connecting to $path. Please check your connection.",
-      );
+      log("Timeout while connecting to $path. Please check your connection.");
     } catch (msg) {
       log(msg);
     }
   }
 
+  /// Subscribe to multiple paths
   Future<void> _subscribes([Set<String>? paths]) async {
     if (paths == null || paths.isEmpty) await _unsubscribes();
     for (var path in (paths ?? _paths)) {
@@ -294,6 +344,7 @@ class Remote<T extends RemoteDelegate> extends ChangeNotifier {
     }
   }
 
+  /// Unsubscribe from all paths
   Future<void> _unsubscribes() async {
     try {
       for (var subscription in _subscriptions.entries) {
