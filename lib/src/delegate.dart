@@ -27,10 +27,10 @@ abstract class RemoteDelegate {
   }
 
   /// Lifecycle hook: before loading starts.
-  Future<void> initializing() async {}
+  Future<void> loading() async {}
 
   /// Lifecycle hook: after all data loaded.
-  Future<void> initialized() async {}
+  Future<void> loaded() async {}
 
   /// Lifecycle hook: when data is ready for a path.
   Future<void> ready(String name, String path) async {}
